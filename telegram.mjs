@@ -1,8 +1,15 @@
 // Keep Telegram's wire API at this boundary. The application owns and drains
 // handler promises, so a slow map request does not block every other user.
 export function telegramTransport(client, { logger = console } = {}) {
+  const handlers = new Map();
   return {
+    async dispatch(update) {
+      for (const [kind, handler] of handlers) {
+        if (update[kind]) await handler(update[kind]);
+      }
+    },
     on(kind, handler) {
+      handlers.set(kind, handler);
       client.on(kind, context => {
         void handler(context.update[kind]).catch(() => {
           logger.error('An update handler failed.');
