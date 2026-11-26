@@ -6,6 +6,9 @@ import { JsonStore } from './storage.mjs';
 import { createPharmacyBot, errorMessage } from './bot.mjs';
 import { telegramTransport } from './telegram.mjs';
 
+import { startWebhook } from './webhook.mjs';
+import { RedisStore } from './redis-store.mjs';
+
 const BASE_DIR = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(BASE_DIR, '.env'), quiet: true });
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -17,7 +20,9 @@ let app;
 let stopping = false;
 let shutdownPromise;
 let pollingPromise;
-const store = new JsonStore(DATA_FILE);
+const webhookUrl = process.env.RENDER_EXTERNAL_URL;
+let server;
+let store;
 
 function shutdown(exitCode = 0) {
   if (shutdownPromise) return shutdownPromise;
@@ -27,11 +32,12 @@ function shutdown(exitCode = 0) {
   deadline.unref();
   shutdownPromise = (async () => {
     try {
+      const closing = server && new Promise(resolve => server.close(resolve));
       const draining = app?.close();
       bot?.stop();
-      await Promise.allSettled([pollingPromise, draining]);
+      await Promise.allSettled([pollingPromise, draining, closing]);
       await bot?.close();
-      await store.flush();
+      await store?.flush();
     } catch (error) {
       console.error(`Shutdown failed: ${errorMessage(error)}`);
       process.exitCode = 1;
@@ -56,6 +62,9 @@ process.on('uncaughtException', error => {
 async function main() {
   if (!TOKEN) throw new Error('Missing TELEGRAM_BOT_TOKEN. Copy .env.example to .env and enter your token.');
   // Load data and register handlers before accepting any Telegram updates.
+  store = webhookUrl
+    ? new RedisStore(process.env.UPSTASH_REDIS_REST_URL, process.env.UPSTASH_REDIS_REST_TOKEN, `pharmacybot:${TOKEN.split(':')[0]}`)
+    : new JsonStore(DATA_FILE);
   await store.load();
   if (stopping) return;
   bot = new Bot(TOKEN, {
@@ -67,7 +76,8 @@ async function main() {
   await bot.init();
   const profile = bot.botInfo;
   if (stopping) return;
-  app = createPharmacyBot({ bot: telegramTransport(bot), store, username: profile.username });
+  const transport = telegramTransport(bot);
+  app = createPharmacyBot({ bot: transport, store, username: profile.username });
   await bot.api.setMyCommands({ commands: [
     { command: 'start', description: 'Start Pharmacy Finder' },
     { command: 'menu', description: 'Open the menu' },
@@ -82,6 +92,14 @@ async function main() {
   ] });
   if (stopping) return;
   console.log(`💊 Pharmacy Finder @${profile.username} is ready.`);
+  if (webhookUrl) {
+    server = await startWebhook({
+      bot, transport, url: webhookUrl, secret: process.env.TELEGRAM_WEBHOOK_SECRET,
+      port: Number(process.env.PORT ?? 10000)
+    });
+    if (stopping) server.close();
+    return;
+  }
   pollingPromise = bot.startPolling(undefined, {
     timeout: 10, allowedUpdates: ['message', 'callback_query'], maxConflictRetries: 0,
     onError: error => console.error(`Telegram polling retry: ${errorMessage(error)}`)
