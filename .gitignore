@@ -1,0 +1,7 @@
+.env
+.env.*
+!.env.example
+pharmacy-data.json*
+node_modules/
+.DS_Store
+coverage/

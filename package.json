@@ -1,0 +1,23 @@
+{
+  "name": "pharmacy-finder-bot",
+  "version": "1.1.0",
+  "description": "Multilingual Telegram bot for nearby pharmacy searches",
+  "private": true,
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs",
+    "check": "node --check index.mjs && node --check bot.mjs && node --check storage.mjs && node --check text.mjs && node --check telegram.mjs",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "dotenv": "18.0.7",
+    "node-telegram-bot-api": "2.4.1"
+  }
+}
